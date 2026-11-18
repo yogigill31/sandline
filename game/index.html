@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>SANDLINE — a three.js tactical FPS</title>
+<style>
+  /* Look plan: canvas, surface, hairline, ink, muted, accent, foe and friend. Every colour
+     below is one of the eight names in src/palette.js. */
+  :root {
+    --canvas: #20242e;
+    --surface: #2b303c;
+    --hairline: #414a5a;
+    --ink: #ece7db;
+    --muted: #9aa3ad;
+    --accent: #f0a830;
+    --foe: #e5484d;
+    --friend: #2fb8a6;
+    --radius-panel: 4px;
+    --radius-control: 8px;
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-readout: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-ui);
+  }
+  #game, #game canvas { position: fixed; inset: 0; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); --gap: 3px; }
+  #crosshair i { position: absolute; background: var(--ink); opacity: .9; }
+  #crosshair i:nth-child(1) { left: 10px; top: calc(-1 * var(--gap)); width: 2px; height: 7px; }
+  #crosshair i:nth-child(2) { left: 10px; bottom: calc(-1 * var(--gap)); width: 2px; height: 7px; }
+  #crosshair i:nth-child(3) { top: 10px; left: calc(-1 * var(--gap)); height: 2px; width: 7px; }
+  #crosshair i:nth-child(4) { top: 10px; right: calc(-1 * var(--gap)); height: 2px; width: 7px; }
+  #crosshair .dot { position: absolute; left: 10px; top: 10px; width: 2px; height: 2px; background: var(--ink); }
+
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 90ms linear; }
+  #hitmarker.on { opacity: 1; }
+  #hitmarker.kill i { background: var(--foe); }
+  #hitmarker i { position: absolute; background: var(--accent); }
+  #hitmarker i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(3) { top: 12px; left: 0; height: 2px; width: 8px; }
+  #hitmarker i:nth-child(4) { top: 12px; right: 0; height: 2px; width: 8px; }
+
+  #damage-flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 140ms linear;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(229, 72, 77, 0.55) 100%); }
+  #damage-flash.on { opacity: 1; }
+
+  #topbar { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--font-readout); }
+  #timer-value { font-size: 28px; letter-spacing: .04em; }
+  #timer-value.planted { color: var(--foe); }
+  #round-score { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  #bomb-status { margin-top: 4px; font-size: 13px; color: var(--foe); letter-spacing: .06em; }
+
+  #killfeed { position: fixed; top: 18px; right: 24px; text-align: right; font-family: var(--font-readout); font-size: 13px; display: grid; gap: 4px; }
+  #killfeed .good { color: var(--accent); }
+  #killfeed .bad { color: var(--muted); }
+
+  #vitals { position: fixed; left: 32px; bottom: 24px; width: 220px; font-family: var(--font-readout); }
+  #vitals .row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--muted); }
+  #vitals .row b { color: var(--ink); font-size: 20px; font-weight: 500; }
+  .bar { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--friend); }
+  #armor-bar { background: var(--muted); }
+
+  #ammo { position: fixed; right: 32px; bottom: 24px; text-align: right; font-family: var(--font-readout); }
+  #ammo .mag { font-size: 56px; line-height: 1; letter-spacing: -0.03em; }
+  #ammo.empty .mag { color: var(--accent); }
+  #ammo-reserve { font-size: 16px; color: var(--muted); }
+  #weapon-name { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  #grenades { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  #grenades .selected { color: var(--ink); font-weight: 600; }
+  #grenades.empty { opacity: 0.4; }
+  #utility-line { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  #danger { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); padding: 10px 18px; background: var(--accent); color: #fff; font-family: var(--font-readout); font-size: 16px; letter-spacing: 0.08em; border-radius: 4px; }
+  #cook { position: fixed; left: 50%; top: 58%; transform: translateX(-50%); width: 180px; text-align: center; }
+  #cook-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+
+  #progress { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); width: 280px; text-align: center; }
+  #progress-label { font-size: 13px; letter-spacing: .08em; margin-bottom: 6px; }
+  #progress .bar { height: 8px; }
+  #progress-bar { background: var(--accent); }
+
+  #spectate { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); font-size: 13px; color: var(--muted); }
+
+  #round-banner { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; }
+  #banner-title { font-size: 40px; font-weight: 500; letter-spacing: -0.02em; }
+  #banner-sub { font-size: 15px; color: var(--muted); margin-top: 6px; }
+
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--canvas) 86%, transparent); }
+  .overlay[hidden], #buy[hidden], #progress[hidden], #spectate[hidden], #bomb-status[hidden], #round-banner[hidden] { display: none; }
+  .panel { width: min(460px, 100%); padding: 32px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-panel); }
+  .panel h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; font-weight: 500; letter-spacing: -0.02em; }
+  .panel p { margin: 0 0 24px; max-width: 46ch; font-size: 16px; line-height: 1.5; color: var(--muted); }
+  #play { font: inherit; font-weight: 500; padding: 12px 16px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--accent); color: var(--canvas); cursor: pointer; }
+  #play:hover { background: var(--ink); border-color: var(--ink); }
+  #play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
+  .keys li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .keys kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); border-radius: var(--radius-panel); font-family: var(--font-readout); font-size: 12px; color: var(--ink); text-align: center; }
+
+  #buy { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--canvas) 72%, transparent); pointer-events: auto; }
+  #buy .panel { width: min(560px, 100%); }
+  #buy h2 { margin: 0 0 4px; font-size: 24px; font-weight: 500; }
+  #buy-money { font-family: var(--font-readout); font-size: 16px; color: var(--accent); margin-bottom: 16px; }
+  #buy-items { display: grid; gap: 8px; }
+  .buy-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; font: inherit; text-align: left; color: var(--ink); background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--radius-control); cursor: pointer; }
+  .buy-item:hover:not(:disabled) { border-color: var(--accent); }
+  .buy-item:disabled { opacity: .45; cursor: default; }
+  .buy-key { font-family: var(--font-readout); font-size: 12px; color: var(--muted); min-width: 18px; }
+  .buy-name { flex: 1; }
+  .buy-cost { font-family: var(--font-readout); font-size: 13px; color: var(--accent); }
+  .buy-hint { margin-top: 16px; font-size: 13px; color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    #hitmarker, #play, #damage-flash { transition-duration: 0.01ms; }
+  }
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud" aria-hidden="true">
+  <div id="crosshair"><i></i><i></i><i></i><i></i><span class="dot"></span></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="damage-flash"></div>
+  <div id="topbar">
+    <div id="timer-value">1:40</div>
+    <div id="round-score">ATK 0 — 0 DEF · Round 1</div>
+    <div id="utility-line" hidden></div>
+    <div id="bomb-status" hidden></div>
+    <div id="danger" hidden>FRAG INCOMING — MOVE</div>
+  </div>
+  <div id="killfeed"></div>
+  <div id="vitals">
+    <div class="bar"><i id="health-bar" style="width:100%"></i></div>
+    <div class="row">HP <b id="health-value">100</b> <span>ARMOR <b id="armor-value">0</b></span></div>
+    <div class="bar"><i id="armor-bar" style="width:0%"></i></div>
+    <div class="row"><span id="money-value">$800</span></div>
+  </div>
+  <div id="ammo">
+    <span class="mag"><span id="ammo-mag">30</span><span id="ammo-reserve">/ 90</span></span>
+    <div id="weapon-name">AR-77 Rifle</div>
+    <div id="grenades"><span id="grenade-frag">FRAG ×0</span> · <span id="grenade-smoke">SMOKE ×0</span></div>
+  </div>
+  <div id="progress" hidden>
+    <div id="progress-label">Planting…</div>
+    <div class="bar"><i id="progress-bar" style="width:0%"></i></div>
+  </div>
+  <div id="cook" hidden>
+    <div id="cook-label">Cooking…</div>
+    <div class="bar"><i id="cook-bar" style="width:0%"></i></div>
+  </div>
+  <div id="spectate" hidden></div>
+  <div id="round-banner" hidden>
+    <div id="banner-title"></div>
+    <div id="banner-sub"></div>
+  </div>
+</div>
+
+<div id="overlay" class="overlay">
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
+    <h1 id="overlay-title">SANDLINE</h1>
+    <p id="overlay-copy">A two-site bomb map in a desert freight yard. You attack with four teammates against five defenders. Plant the bomb at A or B, or eliminate the other team — then spend what you earned. The bots throw grenades too: a frag at an enemy they can see, a smoke when a site is executed — listen for the pin pull and watch the sky.</p>
+    <button id="play" type="button">Click to play</button>
+    <ul class="keys">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</li>
+      <li><kbd>Mouse</kbd> Look</li>
+      <li><kbd>Click</kbd> Fire</li>
+      <li><kbd>R</kbd> Reload</li>
+      <li><kbd>1</kbd>–<kbd>5</kbd> Weapons</li>
+      <li><kbd>G</kbd> Throw grenade <kbd>Q</kbd> Swap grenade</li>
+      <li><kbd>G</kbd> Hold to cook — the fuse burns in hand</li>
+      <li>Bots throw frags &amp; smoke — listen for the pin</li>
+      <li><kbd>E</kbd> Plant / defuse</li>
+      <li><kbd>B</kbd> Buy menu</li>
+      <li><kbd>Ctrl</kbd> Crouch</li>
+      <li><kbd>Space</kbd> Jump</li>
+    </ul>
+  </section>
+</div>
+
+<div id="buy" hidden>
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="buy-title">
+    <h2 id="buy-title">Buy weapons</h2>
+    <div id="buy-money">$800</div>
+    <div id="buy-items"></div>
+    <p class="buy-hint">Click an item or press its number key. The menu closes when the round starts. <kbd>B</kbd> closes it.</p>
+    <p id="buy-hint" class="buy-hint"></p>
+  </section>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
